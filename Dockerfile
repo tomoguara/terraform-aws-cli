@@ -1,17 +1,22 @@
 # Setup build arguments with default versions
 ARG AWS_CLI_VERSION
 ARG TERRAFORM_VERSION
+ARG PYTHON_VERSION=3
 ARG PYTHON_MAJOR_VERSION=3.9
-ARG DEBIAN_VERSION=bullseye-20210902-slim
+ARG UBUNTU_VERSION=20.04
+ARG TZ=US/Pacific
+ARG DEBIAN_FRONTEND=noninteractive
 
 # Download Terraform binary
-FROM debian:${DEBIAN_VERSION} as terraform
+FROM ubuntu:${UBUNTU_VERSION} as terraform
 ARG TERRAFORM_VERSION
 RUN apt-get update
-RUN apt-get install --no-install-recommends -y curl=7.74.0-1.3+deb11u1
-RUN apt-get install --no-install-recommends -y ca-certificates=20210119
-RUN apt-get install --no-install-recommends -y unzip=6.0-26
-RUN apt-get install --no-install-recommends -y gnupg=2.2.27-2
+RUN apt-get install --no-install-recommends -y curl
+RUN apt-get install --no-install-recommends -y ca-certificates
+RUN apt-get install --no-install-recommends -y unzip
+RUN apt-get install --no-install-recommends -y gnupg
+RUN apt-get install --no-install-recommends -y software-properties-common
+
 WORKDIR /workspace
 RUN curl -Os https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_SHA256SUMS
 RUN curl -Os https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip
@@ -23,39 +28,51 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN grep terraform_${TERRAFORM_VERSION}_linux_amd64.zip terraform_${TERRAFORM_VERSION}_SHA256SUMS | sha256sum -c -
 RUN unzip -j terraform_${TERRAFORM_VERSION}_linux_amd64.zip
 
-# Install AWS CLI using PIP
-FROM debian:${DEBIAN_VERSION} as aws-cli
+# Build final image with AWS CLI
+FROM ubuntu:${UBUNTU_VERSION}
+LABEL maintainer="ocm team"
+ARG PYTHON_MAJOR_VERSION
 ARG AWS_CLI_VERSION
 ARG PYTHON_MAJOR_VERSION
-RUN apt-get update
-RUN apt-get install -y --no-install-recommends python3=${PYTHON_MAJOR_VERSION}.2-3
-RUN apt-get install -y --no-install-recommends python3-pip=20.3.4-4
-RUN pip3 install --no-cache-dir setuptools==60.8.2
-RUN pip3 install --no-cache-dir awscli==${AWS_CLI_VERSION}
 
-# Build final image
-FROM debian:${DEBIAN_VERSION}
-LABEL maintainer="bgauduch@github"
-ARG PYTHON_MAJOR_VERSION
-RUN apt-get update \
+# Set the TimeZone details
+RUN ln -snf /usr/share/zoneinfo/${TZ} /etc/localtime && echo ${TZ} > /etc/timezone
+RUN echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections
+RUN apt-get update && apt-get -y install tzdata
+
+RUN DEBIAN_FRONTEND=noninteractive apt-get update \
   && apt-get install -y --no-install-recommends \
-    ca-certificates=20210119\
-    git=1:2.30.2-1 \
-    jq=1.6-2.1 \
-    python3=${PYTHON_MAJOR_VERSION}.2-3 \
+    ca-certificates \
+    git \
+    jq \
+    curl \
+    unzip \
+    python${PYTHON_MAJOR_VERSION} \
+    libpython${PYTHON_MAJOR_VERSION}-dev \
+    python3-pip \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/* \
   && update-alternatives --install /usr/bin/python python /usr/bin/python${PYTHON_MAJOR_VERSION} 1
+
+# Install Setuptools
+RUN pip3 install --no-cache-dir setuptools
+
+# Download and install the AWS CLI  binary
+# Ref: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
+RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+RUN unzip awscliv2.zip
+RUN ./aws/install
+
+# Copy Terraform details to Final build
+RUN dpkg-reconfigure --frontend noninteractive tzdata
 WORKDIR /workspace
 COPY --from=terraform /workspace/terraform /usr/local/bin/terraform
-COPY --from=aws-cli /usr/local/bin/aws* /usr/local/bin/
-COPY --from=aws-cli /usr/local/lib/python${PYTHON_MAJOR_VERSION}/dist-packages /usr/local/lib/python${PYTHON_MAJOR_VERSION}/dist-packages
-COPY --from=aws-cli /usr/lib/python3/dist-packages /usr/lib/python3/dist-packages
 
-RUN groupadd --gid 1001 nonroot \
+# Create a jenkins user
+RUN groupadd --gid 1001 jenkins \
   # user needs a home folder to store aws credentials
-  && useradd --gid nonroot --create-home --uid 1001 nonroot \
-  && chown nonroot:nonroot /workspace
-USER nonroot
+  && useradd --gid jenkins --create-home --uid 1001 jenkins \
+  && chown jenkins:jenkins /workspace
+USER jenkins
 
 CMD ["bash"]
