@@ -33,7 +33,9 @@ FROM ubuntu:${UBUNTU_VERSION}
 LABEL maintainer="ocm team"
 ARG PYTHON_MAJOR_VERSION
 ARG AWS_CLI_VERSION
+ARG TERRAFORM_VERSION
 ARG PYTHON_MAJOR_VERSION
+ADD ca-certs /usr/local/share/ca-certificates
 
 # Set the TimeZone details
 RUN ln -snf /usr/share/zoneinfo/${TZ} /etc/localtime && echo ${TZ} > /etc/timezone
@@ -45,8 +47,9 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get update \
     ca-certificates \
     git \
     jq \
-    curl \
     unzip \
+    vim \
+    curl \
     python${PYTHON_MAJOR_VERSION} \
     libpython${PYTHON_MAJOR_VERSION}-dev \
     python3-pip \
@@ -54,8 +57,11 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get update \
   && rm -rf /var/lib/apt/lists/* \
   && update-alternatives --install /usr/bin/python python /usr/bin/python${PYTHON_MAJOR_VERSION} 1
 
-# Install Setuptools
+# Install Setuptools and test tools
 RUN pip3 install --no-cache-dir setuptools
+RUN pip3 install -U pytest
+RUN pip3 install -U pytest-cov
+
 
 # Download and install the AWS CLI  binary
 # Ref: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
