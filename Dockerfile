@@ -61,6 +61,7 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get update \
 RUN pip3 install --no-cache-dir setuptools
 RUN pip3 install -U pytest
 RUN pip3 install -U pytest-cov
+RUN pip3 install -U boto3
 
 
 # Download and install the AWS CLI  binary
